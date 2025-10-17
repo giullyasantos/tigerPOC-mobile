@@ -13,7 +13,10 @@ function WorkOrderList() {
   const { user } = useAuth();
   const { isOnline } = useOffline();
 
+  console.log('WorkOrderList rendered, user:', user?.id, 'filter:', filter);
+
   useEffect(() => {
+    console.log('useEffect triggered, calling loadWorkOrders');
     loadWorkOrders();
   }, [user, isOnline, filter]);
 
