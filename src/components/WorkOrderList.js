@@ -38,6 +38,11 @@ function WorkOrderList() {
         orders = await offlineService.getWorkOrders();
       }
 
+      // Log what we got from API
+      console.log('Fetched orders from API:', orders.length);
+      console.log('Order statuses:', orders.map(o => o.status));
+      console.log('Current filter:', filter);
+
       // Filter on client side based on selected tab
       if (filter === 'assigned') {
         // Active tab: show assigned and in-progress
@@ -52,6 +57,7 @@ function WorkOrderList() {
       }
       // else filter === 'all': show everything
 
+      console.log('After filtering:', orders.length);
       setWorkOrders(orders);
       setError('');
     } catch (err) {
