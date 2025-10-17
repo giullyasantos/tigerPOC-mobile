@@ -15,7 +15,7 @@ function WorkOrderList() {
 
   useEffect(() => {
     loadWorkOrders();
-  }, [user, isOnline]);
+  }, [user, isOnline, filter]);
 
   const loadWorkOrders = async () => {
     try {
@@ -24,9 +24,9 @@ function WorkOrderList() {
 
       if (isOnline) {
         try {
+          // Don't pass status filter to API - get all work orders for this worker
           const response = await apiService.getWorkOrders({
-            assignedTo: user?.id,
-            status: filter === 'all' ? undefined : filter
+            assignedTo: user?.id
           });
           orders = response.data.workOrders || response.data;
           await offlineService.saveWorkOrders(orders);
@@ -38,12 +38,19 @@ function WorkOrderList() {
         orders = await offlineService.getWorkOrders();
       }
 
-      if (filter !== 'all') {
+      // Filter on client side based on selected tab
+      if (filter === 'assigned') {
+        // Active tab: show assigned and in-progress
         orders = orders.filter(order =>
-          order.status === filter ||
-          (filter === 'assigned' && (order.status === 'assigned' || order.status === 'in-progress'))
+          order.status === 'assigned' ||
+          order.status === 'in-progress' ||
+          order.status === 'pending'
         );
+      } else if (filter === 'completed') {
+        // Completed tab: show only completed
+        orders = orders.filter(order => order.status === 'completed');
       }
+      // else filter === 'all': show everything
 
       setWorkOrders(orders);
       setError('');
