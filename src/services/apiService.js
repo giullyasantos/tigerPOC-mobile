@@ -1,12 +1,20 @@
-import { supabase } from '../config/supabase';
+import { API_ENDPOINTS } from '../config/api';
 
 class ApiService {
   constructor() {
-    // No need for axios client anymore, using Supabase directly
+    // Using Railway backend API
+  }
+
+  getAuthHeaders() {
+    const token = localStorage.getItem('accessToken');
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    };
   }
 
   setAuthToken(token) {
-    // Supabase handles auth automatically
+    localStorage.setItem('accessToken', token);
   }
 
   async login(email, password) {
@@ -20,43 +28,41 @@ class ApiService {
   }
 
   async refreshToken(refreshToken) {
-    // Supabase handles token refresh automatically
+    // This is now handled by AuthContext
+    throw new Error('Use AuthContext refresh instead');
   }
 
   async getWorkOrders(params = {}) {
     try {
-      let query = supabase
-        .from('work_orders')
-        .select(`
-          *,
-          workers!work_orders_assigned_worker_fkey (
-            id,
-            name,
-            email
-          )
-        `);
+      // Build query parameters
+      const queryParams = new URLSearchParams();
 
-      // Filter by assigned worker
       if (params.assignedTo) {
-        query = query.eq('assigned_worker', params.assignedTo);
+        queryParams.append('assignedWorker', params.assignedTo);
       }
 
-      // Filter by status
       if (params.status) {
-        query = query.eq('status', params.status);
+        queryParams.append('status', params.status);
       }
 
-      // Order by scheduled date
-      query = query.order('scheduled_date', { ascending: true, nullsFirst: false });
+      const url = `${API_ENDPOINTS.WORK_ORDERS.BASE}?${queryParams.toString()}`;
 
-      const { data, error } = await query;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: this.getAuthHeaders(),
+      });
 
-      if (error) throw error;
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
 
       // Transform data to match existing format
-      const workOrders = data.map(order => ({
+      const workOrders = (data.workOrders || data.data || data).map(order => ({
         id: order.id,
-        workOrderNumber: order.id.substring(0, 8),
+        workOrderNumber: order.work_order_number || order.id.substring(0, 8),
         title: order.title,
         description: order.description,
         customerName: order.customer_name,
@@ -89,51 +95,48 @@ class ApiService {
 
   async getWorkOrder(id) {
     try {
-      const { data, error } = await supabase
-        .from('work_orders')
-        .select(`
-          *,
-          workers!work_orders_assigned_worker_fkey (
-            id,
-            name,
-            email,
-            phone
-          )
-        `)
-        .eq('id', id)
-        .single();
+      const response = await fetch(API_ENDPOINTS.WORK_ORDERS.BY_ID(id), {
+        method: 'GET',
+        headers: this.getAuthHeaders(),
+      });
 
-      if (error) throw error;
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const order = data.workOrder || data;
 
       // Transform data to match existing format
       const workOrder = {
-        id: data.id,
-        workOrderNumber: data.id.substring(0, 8),
-        title: data.title,
-        description: data.description,
-        customerName: data.customer_name,
+        id: order.id,
+        workOrderNumber: order.work_order_number || order.id.substring(0, 8),
+        title: order.title,
+        description: order.description,
+        customerName: order.customer_name,
         customer: {
-          name: data.customer_name,
-          email: data.customer_email,
-          phone: data.customer_phone,
+          name: order.customer_name,
+          email: order.customer_email,
+          phone: order.customer_phone,
         },
-        address: data.address,
-        priority: data.priority,
-        status: data.status,
-        assignedWorker: data.workers ? {
-          id: data.workers.id,
-          name: data.workers.name,
-          email: data.workers.email,
-          phone: data.workers.phone,
+        address: order.address,
+        priority: order.priority,
+        status: order.status,
+        assignedWorker: order.workers ? {
+          id: order.workers.id,
+          name: order.workers.name,
+          email: order.workers.email,
+          phone: order.workers.phone,
         } : null,
-        estimatedHours: data.estimated_hours,
-        hourlyRate: data.hourly_rate,
-        materialCosts: data.material_costs,
-        totalCost: data.total_cost,
-        scheduledDate: data.scheduled_date,
-        createdAt: data.created_at,
-        updatedAt: data.updated_at,
-        notes: data.notes,
+        estimatedHours: order.estimated_hours,
+        hourlyRate: order.hourly_rate,
+        materialCosts: order.material_costs,
+        totalCost: order.total_cost,
+        scheduledDate: order.scheduled_date,
+        createdAt: order.created_at,
+        updatedAt: order.updated_at,
+        notes: order.notes,
       };
 
       return { data: workOrder };
@@ -145,27 +148,18 @@ class ApiService {
 
   async updateWorkOrder(id, updateData) {
     try {
-      // Transform data to match database schema
-      const dbData = {};
+      const response = await fetch(API_ENDPOINTS.WORK_ORDERS.BY_ID(id), {
+        method: 'PUT',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(updateData),
+      });
 
-      if (updateData.status) dbData.status = updateData.status;
-      if (updateData.notes) dbData.notes = updateData.notes;
-      if (updateData.description) dbData.description = updateData.description;
-      if (updateData.estimatedHours) dbData.estimated_hours = updateData.estimatedHours;
-      if (updateData.materialCosts) dbData.material_costs = updateData.materialCosts;
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}`);
+      }
 
-      // Always update the updated_at timestamp
-      dbData.updated_at = new Date().toISOString();
-
-      const { data, error } = await supabase
-        .from('work_orders')
-        .update(dbData)
-        .eq('id', id)
-        .select()
-        .single();
-
-      if (error) throw error;
-
+      const data = await response.json();
       return { data };
     } catch (error) {
       console.error('Error updating work order:', error);
@@ -175,25 +169,12 @@ class ApiService {
 
   async uploadPhoto(file) {
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
-      const filePath = `work-order-photos/${fileName}`;
-
-      const { data, error } = await supabase.storage
-        .from('photos')
-        .upload(filePath, file);
-
-      if (error) throw error;
-
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('photos')
-        .getPublicUrl(filePath);
-
+      // For now, return a placeholder - we'll implement photo upload later
+      console.warn('Photo upload not yet implemented with Railway backend');
       return {
         data: {
-          url: publicUrl,
-          path: filePath
+          url: URL.createObjectURL(file),
+          path: file.name
         }
       };
     } catch (error) {
@@ -204,19 +185,10 @@ class ApiService {
 
   async submitTaskCompletion(workOrderId, completionData) {
     try {
-      // Update work order status to completed
-      const { error } = await supabase
-        .from('work_orders')
-        .update({
-          status: 'completed',
-          notes: completionData.notes || '',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', workOrderId);
-
-      if (error) throw error;
-
-      return { data: { success: true } };
+      return await this.updateWorkOrder(workOrderId, {
+        status: 'completed',
+        notes: completionData.notes || '',
+      });
     } catch (error) {
       console.error('Error submitting task completion:', error);
       throw error;
@@ -225,15 +197,8 @@ class ApiService {
 
   async getWorker(workerId) {
     try {
-      const { data, error } = await supabase
-        .from('workers')
-        .select('*')
-        .eq('id', workerId)
-        .single();
-
-      if (error) throw error;
-
-      return { data };
+      // Not needed for mobile app - using AuthContext user data
+      throw new Error('Use AuthContext user instead');
     } catch (error) {
       console.error('Error fetching worker:', error);
       throw error;
@@ -242,15 +207,8 @@ class ApiService {
 
   async getWorkerByEmail(email) {
     try {
-      const { data, error } = await supabase
-        .from('workers')
-        .select('*')
-        .eq('email', email)
-        .single();
-
-      if (error) throw error;
-
-      return { data };
+      // Not needed for mobile app - using AuthContext user data
+      throw new Error('Use AuthContext user instead');
     } catch (error) {
       console.error('Error fetching worker by email:', error);
       throw error;
